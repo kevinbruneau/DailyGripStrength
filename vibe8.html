@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Grip Training Timer</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: sans-serif;
+      background-color: #f0f0f0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      transition: background-color 0.3s ease;
+      text-align: center;
+    }
+
+    .paused {
+      filter: brightness(60%);
+    }
+
+    .transition {
+      animation: flash 0.5s ease-in-out;
+    }
+
+    .prep-animate {
+      animation: pulse 1s ease-in-out;
+      color: red;
+    }
+
+    @keyframes flash {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+
+    @keyframes pulse {
+      0% { transform: scale(1); }
+      50% { transform: scale(1.3); }
+      100% { transform: scale(1); }
+    }
+
+    .container {
+      max-width: 400px;
+      width: 90%;
+      padding: 20px;
+      border-radius: 12px;
+      background: white;
+      box-shadow: 0 0 10px rgba(0,0,0,0.1);
+    }
+
+    h1 {
+      margin-bottom: 10px;
+      font-size: 1.8rem;
+    }
+
+    #phase {
+      font-size: 1.5rem;
+      margin: 10px 0;
+    }
+
+    #next-step {
+      font-size: 1rem;
+      margin: 5px 0;
+      color: #666;
+    }
+
+    #timer {
+      font-size: 3rem;
+      font-weight: bold;
+      margin: 10px 0;
+      transition: transform 0.2s ease-in-out;
+    }
+
+    #reps {
+      margin: 15px 0;
+      font-size: 1rem;
+    }
+
+    #progress-container {
+      width: 100%;
+      height: 10px;
+      background-color: #eee;
+      border-radius: 5px;
+      overflow: hidden;
+      margin-bottom: 15px;
+    }
+
+    #progress-bar {
+      height: 10px;
+      background-color: #4caf50;
+      width: 0%;
+      transition: width 0.5s ease;
+    }
+
+    button {
+      padding: 10px 20px;
+      margin: 5px;
+      font-size: 1rem;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      background-color: #333;
+      color: white;
+    }
+
+    button:disabled {
+      background-color: #aaa;
+      cursor: not-allowed;
+    }
+
+    .train {
+      background-color: #ffdddd;
+    }
+
+    .rest {
+      background-color: #ddeeff;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Grip Training Timer</h1>
+    <div id="phase">Press Start</div>
+    <div id="next-step"></div>
+    <div id="timer">--</div>
+    <div id="reps">Left: 0 / 10<br>Right: 0 / 10</div>
+    <div id="progress-container"><div id="progress-bar"></div></div>
+    <button id="startBtn">Start</button>
+    <button id="pauseBtn" disabled>Pause</button>
+    <button id="skipBtn" disabled>Skip</button>
+    <button id="resetBtn" disabled>Reset</button>
+  </div>
+
+  <audio id="beep" src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg" preload="auto"></audio>
+  
+  <script>
+    const phaseEl = document.getElementById('phase');
+    const nextStepEl = document.getElementById('next-step');
+    const timerEl = document.getElementById('timer');
+    const repsEl = document.getElementById('reps');
+    const startBtn = document.getElementById('startBtn');
+    const pauseBtn = document.getElementById('pauseBtn');
+    const skipBtn = document.getElementById('skipBtn');
+    const resetBtn = document.getElementById('resetBtn');
+    const beep = document.getElementById('beep');
+        const progressBar = document.getElementById('progress-bar');
+
+    const phases = [
+      { label: 'Left Hand – Train', duration: 10, class: 'train' },
+      { label: 'Now: Rest',  duration: 20, class: 'rest' },
+      { label: 'Right Hand – Train', duration: 10, class: 'train' },
+      { label: 'Now: Rest',  duration: 20, class: 'rest' },
+    ];
+
+    let currentPhase = 0;
+    let leftCount = 0;
+    let rightCount = 0;
+    let repsPerHand = 10;
+    let intervalId = null;
+    let timeLeft = 0;
+    let running = false;
+    let paused = false;
+    let preCountdown = 3;
+    let preInterval = null;
+
+    function updateUI() {
+      const phase = phases[currentPhase];
+      phaseEl.textContent = phase.label;
+      timerEl.textContent = timeLeft + 's';
+
+      if (phase.label.includes("Rest") && timeLeft <= 3 && timeLeft > 0) {
+        timerEl.classList.add("prep-animate");
+      } else {
+        timerEl.classList.remove("prep-animate");
+      }
+
+      repsEl.innerHTML = `Left: ${leftCount} / ${repsPerHand}<br>Right: ${rightCount} / ${repsPerHand}`;
+      document.body.className = paused ? `paused ${phase.class}` : phase.class;
+
+      const totalReps = leftCount + rightCount;
+      const totalTarget = repsPerHand * 2;
+      const percentComplete = (totalReps / totalTarget) * 100;
+      progressBar.style.width = percentComplete + '%';
+
+      if (phase.label.includes("Rest")) {
+        const nextPhase = phases[(currentPhase + 1) % phases.length];
+        nextStepEl.textContent = `Next: ${nextPhase.label}`;
+      } else {
+        nextStepEl.textContent = '';
+      }
+    }
+
+    function nextPhase() {
+      const phase = phases[currentPhase];
+      if (phase.label.includes("Left Hand – Train")) leftCount++;
+      if (phase.label.includes("Right Hand – Train")) rightCount++;
+
+      if (leftCount >= repsPerHand && rightCount >= repsPerHand) {
+        stopTimer();
+        phaseEl.textContent = "Session Complete!";
+        timerEl.textContent = "✔️";
+        nextStepEl.textContent = "";
+        return;
+      }
+
+      currentPhase = (currentPhase + 1) % phases.length;
+      timeLeft = phases[currentPhase].duration;
+      document.body.classList.add('transition');
+      setTimeout(() => document.body.classList.remove('transition'), 500);
+      beep.play();
+      updateUI();
+    }
+
+    function tick() {
+      if (!paused) {
+        timeLeft--;
+        const phase = phases[currentPhase];
+        
+
+        if (timeLeft <= 0) {
+          nextPhase();
+        } else {
+          updateUI();
+        }
+      }
+    }
+
+    function startSession() {
+      if (running) return;
+      running = true;
+      paused = false;
+      startBtn.disabled = true;
+      pauseBtn.disabled = true;
+      skipBtn.disabled = true;
+      resetBtn.disabled = true;
+
+      currentPhase = 0;
+      leftCount = 0;
+      rightCount = 0;
+      timeLeft = phases[currentPhase].duration;
+
+      let countdown = preCountdown;
+      phaseEl.textContent = `Starting soon: ${phases[0].label}`;
+      timerEl.textContent = countdown;
+      nextStepEl.textContent = '';
+      document.body.className = '';
+
+      preInterval = setInterval(() => {
+        countdown--;
+        timerEl.textContent = countdown;
+        if (countdown <= 0) {
+          clearInterval(preInterval);
+          pauseBtn.disabled = false;
+          skipBtn.disabled = false;
+          resetBtn.disabled = false;
+          beep.play();
+          updateUI();
+          intervalId = setInterval(tick, 1000);
+        }
+      }, 1000);
+    }
+
+    function togglePause() {
+      paused = !paused;
+      pauseBtn.textContent = paused ? 'Resume' : 'Pause';
+      updateUI();
+    }
+
+    function skipStep() {
+      nextPhase();
+    }
+
+    function stopTimer() {
+      running = false;
+      clearInterval(intervalId);
+      clearInterval(preInterval);
+      intervalId = null;
+      startBtn.disabled = true;
+      pauseBtn.disabled = true;
+      skipBtn.disabled = true;
+      document.body.classList.remove('paused');
+    }
+
+    function resetSession() {
+      stopTimer();
+      leftCount = 0;
+      rightCount = 0;
+      currentPhase = 0;
+      timeLeft = 0;
+      paused = false;
+      startBtn.disabled = false;
+      pauseBtn.disabled = true;
+      skipBtn.disabled = true;
+      resetBtn.disabled = true;
+      pauseBtn.textContent = 'Pause';
+      document.body.className = '';
+      phaseEl.textContent = 'Press Start';
+      timerEl.textContent = '--';
+      nextStepEl.textContent = '';
+      repsEl.innerHTML = `Left: 0 / ${repsPerHand}<br>Right: 0 / ${repsPerHand}`;
+      progressBar.style.width = '0%';
+    }
+
+    startBtn.addEventListener('click', startSession);
+    pauseBtn.addEventListener('click', togglePause);
+    skipBtn.addEventListener('click', skipStep);
+    resetBtn.addEventListener('click', resetSession);
+  </script>
+</body>
+</html>
